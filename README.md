@@ -10,6 +10,7 @@ The algorithm works by:
 1. Randomly selecting a handful of points and setting them to be white (RGB(0xFF, 0xFF, 0xFF))
 2. Expanding the white points into parallelogrammes several pixels across.
 3. Repeatedly applying a 3x3 [box-blur](https://w.wiki/Hpci).
+
 It is very conceptually simple, but produces decent results.
 ### Perlin Noise
 Not implemented yet.
@@ -18,5 +19,7 @@ From your terminal or terminal-emulator, enter the src directory.
 ```bash
 cd year-12-second-term-project/src
 ```
-Then, run `uv run main.py`.
+Then, run 
+`uv run main.py`.
+
 Use Up and Down arrow keys to select options as they appear.
