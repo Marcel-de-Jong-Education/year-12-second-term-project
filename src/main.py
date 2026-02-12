@@ -102,7 +102,7 @@ def box_blur(value_matrix: list, repetitions: int = 1, total: int = 1) -> list: 
 
 def gaussian_blur(value_matrix: list) -> list:
     """Applies a gaussian blur."""
-
+    gh
 
 
 
