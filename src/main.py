@@ -9,6 +9,8 @@ from enum import StrEnum
 import inquirer
 from time import time
 from PIL import Image
+from math import log
+from AES_Python import AES # https://pypi.org/project/AES-Python/
 from numpy import (
     array,
     zeros,
@@ -18,6 +20,8 @@ from numpy import (
     )
 
 # ----------------Definitions---------------- #
+
+encryption_manager = AES(r_mode="ECB", key="my-encryption-key")
 
 class Noise(StrEnum): # Not a typical python class, enums are special
     """Enumerates noise types to ensure type-safety."""
@@ -29,19 +33,79 @@ class Noise(StrEnum): # Not a typical python class, enums are special
 
 
 def box_blur(value_matrix: list, repetitions: int = 1, total: int = 1) -> list: # total is just for UX and technically unnecessary. Total should always == repetitions except in recursions.
-    """A recursive blurring function that averages a ring around each point."""
+    """A recursive blurring function that averages a 3x3 kernel around each point."""
+    # Border pixels have seperate handling!
+    # This is more optimised than try;catch, though significantly more tedious
     blur = []
-    for y in range(len(value_matrix)):
+
+    row = []
+    # Handle top-left corner
+    # - - -
+    # - x x
+    # - x x
+    value = int(value_matrix[0][0]) # centre
+    value += value_matrix[1][0] # down
+    value += value_matrix[0][1] # right
+    value += value_matrix[1][1] # down-right
+    value /= 4
+    row.append(value)
+    # handle first row
+    # - - -
+    # x x x
+    # x x x
+    for x in range(len(value_matrix[0])-2): # skip the first and stop before the last, hence -2
+            t = x+1 # skips the first
+            value = int(value_matrix[0][t]) # centre
+            value += value_matrix[0][t-1] # left
+            value += value_matrix[1][t] # down
+            value += value_matrix[0][t+1] # right
+            value += value_matrix[1][t-1] # down-left
+            value += value_matrix[1][t+1] # down-right
+            value /= 6
+            row.append(value)
+    # handle top-right corner
+    # - - -
+    # x x -
+    # x x -
+    end = len(value_matrix[0])-1 # for readability
+
+    value = int(value_matrix[0][end]) # centre
+    value += value_matrix[1][end] # down
+    value += value_matrix[0][end-1] # left
+    value += value_matrix[1][end-1] # down-left
+    value /= 4
+    row.append(value)
+
+    blur.append(row)
+
+    for y in range(len(value_matrix)-2): # subtract 2, because seperate handling for first and final rows
+        y += 1 # reference is shifted by 1, this is undone at the end
         line = []
 
+        # handle left border pixel
+        # - x x
+        # - x x
+        # - x x
+        value = int(value_matrix[y][0]) # centre
+        value += value_matrix[y-1][0] # up
+        value += value_matrix[y+1][0] # down
+        value += value_matrix[y][1] # right
+        value += value_matrix[y-1][1] # up-right
+        value += value_matrix[y-1][1] # down-right
+        value /= 6
+
+        line.append(value)
+
         for x in range(len(value_matrix[y])):
+            # handle non-border
+            # x x x
+            # x x x
+            # x x x
             count = 1
-            value = int(value_matrix[y][x])
-            try:
-                value += value_matrix[y-1][x] # up
-                count += 1
-            except:
-                pass
+            value = int(value_matrix[y][x]) # centre
+
+            value += value_matrix[y-1][x] # up
+            count += 1
 
             try:
                 value += value_matrix[y][x-1] # left
@@ -89,7 +153,22 @@ def box_blur(value_matrix: list, repetitions: int = 1, total: int = 1) -> list: 
 
             line.append(value)
 
+        # handle right border pixel
+        # x x -
+        # x x -
+        # x x -
+        value = int(value_matrix[y][0]) # centre
+        value += value_matrix[y-1][0] # up
+        value += value_matrix[y+1][0] # down
+        value += value_matrix[y][1] # right
+        value += value_matrix[y-1][1] # up-right
+        value += value_matrix[y-1][1] # down-right
+        value /= 6
+
+        line.append(value)
+
         blur.append(line)
+        y -= 1 # correct reference back
 
     if repetitions <= 1:
         return blur
@@ -102,7 +181,8 @@ def box_blur(value_matrix: list, repetitions: int = 1, total: int = 1) -> list: 
 
 def gaussian_blur(value_matrix: list) -> list:
     """Applies a gaussian blur."""
-    gh
+    result = []
+    return result
 
 
 
@@ -149,6 +229,7 @@ def generate_noise(width: int, height: int, noise_type: StrEnum = Noise.WHITE, d
 
                 matrix.append(line)
 
+            matrix = box_blur(matrix, 64, 64)
             return matrix
 
 
@@ -169,7 +250,6 @@ def generate_noise(width: int, height: int, noise_type: StrEnum = Noise.WHITE, d
                 matrix.append(line)
 
             # Spread noise
-            # Note: slows down EXTREMELY fast. Needs optimisation
 
             for i in range(spread_distance):
                 current_origins = list(origins) # Avoid TOCTOU
@@ -199,8 +279,9 @@ def generate_noise(width: int, height: int, noise_type: StrEnum = Noise.WHITE, d
                     except:
                         pass
 
-            # blur
-            matrix = box_blur(value_matrix=matrix, repetitions=192, total=192) # ~1 second per 20 repetitions at 256x256
+            # blur (log_2(256^2)-2)^2 times
+            blur_count = int((log(width*height, 2)-2)**2)
+            matrix = box_blur(value_matrix=matrix, repetitions=blur_count, total=blur_count) # ~1 second per 20 repetitions at 256x256
 
             return matrix
 
@@ -212,6 +293,37 @@ def generate_noise(width: int, height: int, noise_type: StrEnum = Noise.WHITE, d
             print(f'Invalid type {noise_type}!')
             raise ValueError
             return matrix
+
+
+
+def noise_octaves(noise: list, octaves: list = [8.0], strength: float = [1]) -> list: # TODO: fix
+    """Adds octaves to noise."""
+
+    # octaves should be number loosely based on what grid size they would standalone suit
+    # e.g. 256x256 => [d=0.8, s=3], octave = log_2(256) = 8
+    # therefore d(ensity) = octave / 10
+    # s(pread) = log_2(octave)
+    for octave in octaves:
+        density = 1/octave/10
+        print(f'd = {density}')
+        spread = int(log(octave, 2))
+        print(f's = {spread}')
+
+        noise = array(noise, dtype=uint8)
+        img = Image.fromarray(noise)
+        img.show()
+
+        noise = noise + array(generate_noise(
+            len(noise), # width
+            len(noise[0]), # height
+            noise_type=Noise.BLOBBY,
+            density_percent=density,
+            spread_distance=spread
+            ), dtype=uint8)
+
+
+
+    return noise
 
 
 
@@ -248,14 +360,20 @@ def noise_to_terrain(noise_matrix: list, sea_level: int = 196): # this made me h
     terrain = zeros((height, width, 3), dtype=uint8)
 
     # masks
-    water = noise < sea_level
+    deep_water = noise < sea_level - 8
+    shallow_water = (noise >= sea_level - 8) & (noise < sea_level)
     beach = (noise >= sea_level) & (noise < sea_level + 4)
-    land = noise >= sea_level + 4
+    grassland = (noise >= sea_level + 4) & (noise < sea_level + 13)
+    forest = (noise >= sea_level + 13) #& (noise < sea_level + 23)
+    #snow = noise >= sea_level + 23
 
     # actual colouring
-    terrain[water] = [0, 0, 128] # water
-    terrain[beach] = [255, 192, 192] # beach
-    terrain[land] = [32, 128, 32] # land
+    terrain[deep_water] = [0, 15, 127] # abyss
+    terrain[shallow_water] = [0, 63, 127] # shallows
+    terrain[beach] = [255, 191, 191] # beach
+    terrain[grassland] = [31, 127, 31] # grass
+    terrain[forest] = [15, 63, 15] # forest
+    #terrain[snow] = [191, 191, 255] # snow
 
     return terrain
 
@@ -287,36 +405,60 @@ def interactive_selection() -> Noise:
 
 
 
-
 # ----------------Script---------------- #
 
 def main() -> int:
     """Runs the script."""
-    try:
-        noise_selection = interactive_selection()
-    except ValueError:
-        return 1
+    if 'y' in input('Developer mode?\n').lower():
+        try:
+            noise_selection = interactive_selection()
+        except ValueError:
+            return 1
 
-    start = time()
-    noise_map = generate_noise(
-        width=256,
-        height=256,
-        noise_type=noise_selection,
-        density_percent=0.8,
-        spread_distance=3
-        )
-    end = time()
-    print(f'Time to generate noise: {end-start}\n')
+        start = time()
+        noise_map = generate_noise(
+            width=0xFF,
+            height=0xFF,
+            noise_type=noise_selection,
+            density_percent=0.8,
+            spread_distance=3
+            )
+        end = time()
+        print(f'Time to generate noise: {end-start}\n')
 
+        if noise_selection == Noise.BLOBBY:
+            #noise_map = noise_octaves(noise_map, [32.0, 1.2])
 
-    if noise_selection == Noise.BLOBBY:
-        terrain = noise_to_terrain(noise_matrix=noise_map, sea_level=32) # sea_level is from 0->255
-        img = Image.fromarray(terrain, mode="RGB")
+            if 'y' in input('Colourise to terrain? [y/N]\n').lower():
+                terrain = noise_to_terrain(noise_matrix=noise_map, sea_level=24) # sea_level is from 0->255
+                img = Image.fromarray(terrain, mode="RGB")
+            else:
+                noise_map = array(noise_map, dtype=uint8)
+                img = Image.fromarray(noise_map)
+
+            img.show()
+            return 0
+
+        noise_map = array(noise_map, dtype=uint8)
+        img = Image.fromarray(noise_map)
         img.show()
-    else:
-        print(noise_to_text(noise_map))
-    return 0
+
+        return 0
+
+    else: # Not developer mode
+        questions = [
+            inquirer.List(
+                "Login or Genesis New User",
+                choices = [
+                    'New User',
+                    ]
+
+                )]
+
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# benchmark: 11.52"
